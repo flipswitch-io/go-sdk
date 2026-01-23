@@ -50,13 +50,13 @@ func main() {
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `apiKey` | `string` | *required* | Environment API key from dashboard |
-| `WithBaseURL` | `string` | `https://api.flipswitch.dev` | Your Flipswitch server URL |
+| `WithBaseURL` | `string` | `https://api.flipswitch.io` | Your Flipswitch server URL |
 | `WithRealtime` | `bool` | `true` | Enable SSE for real-time flag updates |
 
 ```go
 provider, err := flipswitch.NewProvider(
     "YOUR_API_KEY",
-    flipswitch.WithBaseURL("https://api.flipswitch.dev"),
+    flipswitch.WithBaseURL("https://api.flipswitch.io"),
     flipswitch.WithRealtime(true),
 )
 ```

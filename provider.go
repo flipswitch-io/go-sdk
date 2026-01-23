@@ -34,7 +34,7 @@ import (
 	"github.com/open-feature/go-sdk/openfeature"
 )
 
-const defaultBaseURL = "https://api.flipswitch.dev"
+const defaultBaseURL = "https://api.flipswitch.io"
 
 // FlipswitchProvider is an OpenFeature provider for Flipswitch with
 // real-time SSE support.

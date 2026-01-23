@@ -8,7 +8,7 @@ type FlipswitchOptions struct {
 	APIKey string
 
 	// BaseURL is the Flipswitch server URL.
-	// Default: "https://api.flipswitch.dev"
+	// Default: "https://api.flipswitch.io"
 	BaseURL string
 
 	// EnableRealtime enables SSE for real-time flag updates.
