@@ -172,6 +172,14 @@ func (p *FlipswitchProvider) Metadata() openfeature.Metadata {
 // Init initializes the provider. Validates the API key and starts SSE connection
 // if real-time is enabled.
 func (p *FlipswitchProvider) Init(evaluationContext openfeature.EvaluationContext) error {
+	// Prevent double initialization (OpenFeature may call Init multiple times)
+	p.mu.Lock()
+	if p.initialized {
+		p.mu.Unlock()
+		return nil
+	}
+	p.mu.Unlock()
+
 	// Validate API key first (OFREP provider doesn't throw on auth errors during init)
 	if err := p.validateAPIKey(); err != nil {
 		return err
@@ -241,13 +249,27 @@ func (p *FlipswitchProvider) Shutdown() {
 }
 
 func (p *FlipswitchProvider) startSseConnection() {
+	telemetryHeaders := p.getTelemetryHeaders()
 	p.sseClient = NewSseClient(
 		p.baseURL,
 		p.apiKey,
+		telemetryHeaders,
 		p.handleFlagChange,
 		p.handleStatusChange,
 	)
 	p.sseClient.Connect()
+}
+
+func (p *FlipswitchProvider) getTelemetryHeaders() map[string]string {
+	if !p.enableTelemetry {
+		return nil
+	}
+	return map[string]string{
+		"X-Flipswitch-SDK":      p.getTelemetrySdkHeader(),
+		"X-Flipswitch-Runtime":  p.getTelemetryRuntimeHeader(),
+		"X-Flipswitch-OS":       p.getTelemetryOsHeader(),
+		"X-Flipswitch-Features": p.getTelemetryFeaturesHeader(),
+	}
 }
 
 func (p *FlipswitchProvider) handleFlagChange(event FlagChangeEvent) {

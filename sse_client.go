@@ -19,11 +19,12 @@ const (
 
 // SseClient handles SSE connections for real-time flag change notifications.
 type SseClient struct {
-	baseURL        string
-	apiKey         string
-	onFlagChange   FlagChangeHandler
-	onStatusChange ConnectionStatusHandler
-	httpClient     *http.Client
+	baseURL          string
+	apiKey           string
+	telemetryHeaders map[string]string
+	onFlagChange     FlagChangeHandler
+	onStatusChange   ConnectionStatusHandler
+	httpClient       *http.Client
 
 	status     ConnectionStatus
 	retryDelay time.Duration
@@ -37,15 +38,17 @@ type SseClient struct {
 func NewSseClient(
 	baseURL string,
 	apiKey string,
+	telemetryHeaders map[string]string,
 	onFlagChange FlagChangeHandler,
 	onStatusChange ConnectionStatusHandler,
 ) *SseClient {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &SseClient{
-		baseURL:        strings.TrimSuffix(baseURL, "/"),
-		apiKey:         apiKey,
-		onFlagChange:   onFlagChange,
-		onStatusChange: onStatusChange,
+		baseURL:          strings.TrimSuffix(baseURL, "/"),
+		apiKey:           apiKey,
+		telemetryHeaders: telemetryHeaders,
+		onFlagChange:     onFlagChange,
+		onStatusChange:   onStatusChange,
 		httpClient: &http.Client{
 			Timeout: 0, // No timeout for SSE
 		},
@@ -106,6 +109,11 @@ func (c *SseClient) connect() error {
 	req.Header.Set("X-API-Key", c.apiKey)
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Cache-Control", "no-cache")
+
+	// Set telemetry headers
+	for key, value := range c.telemetryHeaders {
+		req.Header.Set(key, value)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
