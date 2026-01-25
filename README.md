@@ -1,11 +1,14 @@
 # Flipswitch Go SDK
 
+[![CI](https://github.com/flipswitch-io/go-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/flipswitch-io/go-sdk/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/flipswitch-io/go-sdk.svg)](https://pkg.go.dev/github.com/flipswitch-io/go-sdk)
+
 Flipswitch SDK for Go with real-time SSE support for OpenFeature.
 
 ## Installation
 
 ```bash
-go get github.com/flipswitch-io/flipswitch/sdks/go
+go get github.com/flipswitch-io/go-sdk
 ```
 
 ## Quick Start
@@ -18,7 +21,7 @@ import (
     "fmt"
 
     "github.com/open-feature/go-sdk/openfeature"
-    flipswitch "github.com/flipswitch-io/flipswitch/sdks/go"
+    flipswitch "github.com/flipswitch-io/go-sdk"
 )
 
 func main() {
@@ -146,6 +149,10 @@ cd examples/demo
 go run main.go <api-key>
 ```
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
 ## License
 
-MIT
+MIT - see [LICENSE](LICENSE) for details.

@@ -17,7 +17,7 @@ import (
 
 	"github.com/open-feature/go-sdk/openfeature"
 
-	flipswitch "github.com/flipswitch-io/flipswitch/sdks/go"
+	flipswitch "github.com/flipswitch-io/go-sdk"
 )
 
 func main() {
