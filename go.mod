@@ -1,4 +1,4 @@
-module github.com/flipswitch-dev/flipswitch/sdks/go
+module github.com/flipswitch-io/flipswitch/sdks/go
 
 go 1.24.0
 

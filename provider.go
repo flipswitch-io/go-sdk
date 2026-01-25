@@ -27,6 +27,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -34,15 +35,19 @@ import (
 	"github.com/open-feature/go-sdk/openfeature"
 )
 
-const defaultBaseURL = "https://api.flipswitch.io"
+const (
+	defaultBaseURL = "https://api.flipswitch.io"
+	sdkVersion     = "0.1.0"
+)
 
 // FlipswitchProvider is an OpenFeature provider for Flipswitch with
 // real-time SSE support.
 type FlipswitchProvider struct {
-	baseURL        string
-	apiKey         string
-	enableRealtime bool
-	httpClient     *http.Client
+	baseURL         string
+	apiKey          string
+	enableRealtime  bool
+	enableTelemetry bool
+	httpClient      *http.Client
 
 	ofrepProvider       *ofrep.Provider
 	flagChangeListeners []FlagChangeHandler
@@ -62,6 +67,7 @@ func NewProvider(apiKey string, opts ...Option) (*FlipswitchProvider, error) {
 		baseURL:             defaultBaseURL,
 		apiKey:              apiKey,
 		enableRealtime:      true,
+		enableTelemetry:     true,
 		httpClient:          &http.Client{},
 		flagChangeListeners: make([]FlagChangeHandler, 0),
 	}
@@ -73,12 +79,53 @@ func NewProvider(apiKey string, opts ...Option) (*FlipswitchProvider, error) {
 	p.baseURL = strings.TrimSuffix(p.baseURL, "/")
 
 	// Create underlying OFREP provider for flag evaluation
+	ofrepOpts := []ofrep.Option{
+		ofrep.WithHeader("X-API-Key", p.apiKey),
+	}
+
+	if p.enableTelemetry {
+		ofrepOpts = append(ofrepOpts,
+			ofrep.WithHeader("X-Flipswitch-SDK", p.getTelemetrySdkHeader()),
+			ofrep.WithHeader("X-Flipswitch-Runtime", p.getTelemetryRuntimeHeader()),
+			ofrep.WithHeader("X-Flipswitch-OS", p.getTelemetryOsHeader()),
+			ofrep.WithHeader("X-Flipswitch-Features", p.getTelemetryFeaturesHeader()),
+		)
+	}
+
 	p.ofrepProvider = ofrep.NewProvider(
 		p.baseURL+"/ofrep/v1",
-		ofrep.WithHeader("X-API-Key", p.apiKey),
+		ofrepOpts...,
 	)
 
 	return p, nil
+}
+
+func (p *FlipswitchProvider) getTelemetrySdkHeader() string {
+	return "go/" + sdkVersion
+}
+
+func (p *FlipswitchProvider) getTelemetryRuntimeHeader() string {
+	return "go/" + runtime.Version()[2:] // Strip "go" prefix from go1.21.0
+}
+
+func (p *FlipswitchProvider) getTelemetryOsHeader() string {
+	return runtime.GOOS + "/" + runtime.GOARCH
+}
+
+func (p *FlipswitchProvider) getTelemetryFeaturesHeader() string {
+	if p.enableRealtime {
+		return "sse=true"
+	}
+	return "sse=false"
+}
+
+func (p *FlipswitchProvider) setTelemetryHeaders(req *http.Request) {
+	if p.enableTelemetry {
+		req.Header.Set("X-Flipswitch-SDK", p.getTelemetrySdkHeader())
+		req.Header.Set("X-Flipswitch-Runtime", p.getTelemetryRuntimeHeader())
+		req.Header.Set("X-Flipswitch-OS", p.getTelemetryOsHeader())
+		req.Header.Set("X-Flipswitch-Features", p.getTelemetryFeaturesHeader())
+	}
 }
 
 // Option is a functional option for configuring the provider.
@@ -102,6 +149,16 @@ func WithRealtime(enabled bool) Option {
 func WithHTTPClient(client *http.Client) Option {
 	return func(p *FlipswitchProvider) {
 		p.httpClient = client
+	}
+}
+
+// WithTelemetry enables or disables telemetry collection.
+// When enabled, the SDK sends usage statistics (SDK version, runtime version,
+// OS, architecture) to help improve the service. No personal data is collected.
+// Defaults to true.
+func WithTelemetry(enabled bool) Option {
+	return func(p *FlipswitchProvider) {
+		p.enableTelemetry = enabled
 	}
 }
 
@@ -150,6 +207,7 @@ func (p *FlipswitchProvider) validateAPIKey() error {
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-API-Key", p.apiKey)
+	p.setTelemetryHeaders(req)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -402,6 +460,7 @@ func (p *FlipswitchProvider) EvaluateAllFlags(evalCtx openfeature.FlattenedConte
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-API-Key", p.apiKey)
+	p.setTelemetryHeaders(req)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -467,6 +526,7 @@ func (p *FlipswitchProvider) EvaluateFlag(flagKey string, evalCtx openfeature.Fl
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-API-Key", p.apiKey)
+	p.setTelemetryHeaders(req)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {

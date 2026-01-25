@@ -2,7 +2,11 @@
 //
 // Run this demo with:
 //
-//	go run main.go <api-key>
+//	go run main.go <api-key> [base-url]
+//
+// Or set the FLIPSWITCH_BASE_URL environment variable:
+//
+//	FLIPSWITCH_BASE_URL=http://localhost:8080 go run main.go <api-key>
 package main
 
 import (
@@ -13,23 +17,39 @@ import (
 
 	"github.com/open-feature/go-sdk/openfeature"
 
-	flipswitch "github.com/flipswitch-dev/flipswitch/sdks/go"
+	flipswitch "github.com/flipswitch-io/flipswitch/sdks/go"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "Usage: go run main.go <api-key>")
+		fmt.Fprintln(os.Stderr, "Usage: go run main.go <api-key> [base-url]")
+		fmt.Fprintln(os.Stderr, "       Or set FLIPSWITCH_BASE_URL environment variable")
 		os.Exit(1)
 	}
 
 	apiKey := os.Args[1]
 
+	// Get base URL from command line or environment variable
+	baseURL := ""
+	if len(os.Args) >= 3 {
+		baseURL = os.Args[2]
+	} else if envURL := os.Getenv("FLIPSWITCH_BASE_URL"); envURL != "" {
+		baseURL = envURL
+	}
+
 	fmt.Println("Flipswitch Go SDK Demo")
 	fmt.Println("======================")
 	fmt.Println()
 
+	// Build provider options
+	var opts []flipswitch.Option
+	if baseURL != "" {
+		fmt.Printf("Using base URL: %s\n", baseURL)
+		opts = append(opts, flipswitch.WithBaseURL(baseURL))
+	}
+
 	// API key is required, all other options have sensible defaults
-	provider, err := flipswitch.NewProvider(apiKey)
+	provider, err := flipswitch.NewProvider(apiKey, opts...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create provider: %v\n", err)
 		os.Exit(1)

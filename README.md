@@ -5,7 +5,7 @@ Flipswitch SDK for Go with real-time SSE support for OpenFeature.
 ## Installation
 
 ```bash
-go get github.com/flipswitch-dev/flipswitch/sdks/go
+go get github.com/flipswitch-io/flipswitch/sdks/go
 ```
 
 ## Quick Start
@@ -18,7 +18,7 @@ import (
     "fmt"
 
     "github.com/open-feature/go-sdk/openfeature"
-    flipswitch "github.com/flipswitch-dev/flipswitch/sdks/go"
+    flipswitch "github.com/flipswitch-io/flipswitch/sdks/go"
 )
 
 func main() {
