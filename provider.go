@@ -43,11 +43,10 @@ const (
 // FlipswitchProvider is an OpenFeature provider for Flipswitch with
 // real-time SSE support.
 type FlipswitchProvider struct {
-	baseURL         string
-	apiKey          string
-	enableRealtime  bool
-	enableTelemetry bool
-	httpClient      *http.Client
+	baseURL        string
+	apiKey         string
+	enableRealtime bool
+	httpClient     *http.Client
 
 	ofrepProvider       *ofrep.Provider
 	flagChangeListeners []FlagChangeHandler
@@ -67,7 +66,6 @@ func NewProvider(apiKey string, opts ...Option) (*FlipswitchProvider, error) {
 		baseURL:             defaultBaseURL,
 		apiKey:              apiKey,
 		enableRealtime:      true,
-		enableTelemetry:     true,
 		httpClient:          &http.Client{},
 		flagChangeListeners: make([]FlagChangeHandler, 0),
 	}
@@ -81,15 +79,10 @@ func NewProvider(apiKey string, opts ...Option) (*FlipswitchProvider, error) {
 	// Create underlying OFREP provider for flag evaluation
 	ofrepOpts := []ofrep.Option{
 		ofrep.WithHeader("X-API-Key", p.apiKey),
-	}
-
-	if p.enableTelemetry {
-		ofrepOpts = append(ofrepOpts,
-			ofrep.WithHeader("X-Flipswitch-SDK", p.getTelemetrySdkHeader()),
-			ofrep.WithHeader("X-Flipswitch-Runtime", p.getTelemetryRuntimeHeader()),
-			ofrep.WithHeader("X-Flipswitch-OS", p.getTelemetryOsHeader()),
-			ofrep.WithHeader("X-Flipswitch-Features", p.getTelemetryFeaturesHeader()),
-		)
+		ofrep.WithHeader("X-Flipswitch-SDK", p.getTelemetrySdkHeader()),
+		ofrep.WithHeader("X-Flipswitch-Runtime", p.getTelemetryRuntimeHeader()),
+		ofrep.WithHeader("X-Flipswitch-OS", p.getTelemetryOsHeader()),
+		ofrep.WithHeader("X-Flipswitch-Features", p.getTelemetryFeaturesHeader()),
 	}
 
 	p.ofrepProvider = ofrep.NewProvider(
@@ -120,12 +113,10 @@ func (p *FlipswitchProvider) getTelemetryFeaturesHeader() string {
 }
 
 func (p *FlipswitchProvider) setTelemetryHeaders(req *http.Request) {
-	if p.enableTelemetry {
-		req.Header.Set("X-Flipswitch-SDK", p.getTelemetrySdkHeader())
-		req.Header.Set("X-Flipswitch-Runtime", p.getTelemetryRuntimeHeader())
-		req.Header.Set("X-Flipswitch-OS", p.getTelemetryOsHeader())
-		req.Header.Set("X-Flipswitch-Features", p.getTelemetryFeaturesHeader())
-	}
+	req.Header.Set("X-Flipswitch-SDK", p.getTelemetrySdkHeader())
+	req.Header.Set("X-Flipswitch-Runtime", p.getTelemetryRuntimeHeader())
+	req.Header.Set("X-Flipswitch-OS", p.getTelemetryOsHeader())
+	req.Header.Set("X-Flipswitch-Features", p.getTelemetryFeaturesHeader())
 }
 
 // Option is a functional option for configuring the provider.
@@ -149,16 +140,6 @@ func WithRealtime(enabled bool) Option {
 func WithHTTPClient(client *http.Client) Option {
 	return func(p *FlipswitchProvider) {
 		p.httpClient = client
-	}
-}
-
-// WithTelemetry enables or disables telemetry collection.
-// When enabled, the SDK sends usage statistics (SDK version, runtime version,
-// OS, architecture) to help improve the service. No personal data is collected.
-// Defaults to true.
-func WithTelemetry(enabled bool) Option {
-	return func(p *FlipswitchProvider) {
-		p.enableTelemetry = enabled
 	}
 }
 
@@ -261,9 +242,6 @@ func (p *FlipswitchProvider) startSseConnection() {
 }
 
 func (p *FlipswitchProvider) getTelemetryHeaders() map[string]string {
-	if !p.enableTelemetry {
-		return nil
-	}
 	return map[string]string{
 		"X-Flipswitch-SDK":      p.getTelemetrySdkHeader(),
 		"X-Flipswitch-Runtime":  p.getTelemetryRuntimeHeader(),
