@@ -512,3 +512,55 @@ func TestBuilder_ShouldAllowCustomBaseUrl(t *testing.T) {
 		t.Errorf("Expected metadata name 'flipswitch', got '%s'", provider.Metadata().Name)
 	}
 }
+
+// ========================================
+// URL Path Tests
+// ========================================
+
+func TestOfrepRequests_ShouldUseCorrectPath(t *testing.T) {
+	var capturedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+
+		// Respond to bulk evaluation (init) and single flag requests
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/ofrep/v1/evaluate/flags" {
+			w.WriteHeader(200)
+			json.NewEncoder(w).Encode(map[string]interface{}{"flags": []interface{}{}})
+			return
+		}
+		if r.URL.Path == "/ofrep/v1/evaluate/flags/test-flag" {
+			w.WriteHeader(200)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"key":   "test-flag",
+				"value": true,
+			})
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer server.Close()
+
+	provider, err := NewProvider(
+		"test-api-key",
+		WithBaseURL(server.URL),
+		WithRealtime(false),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+	defer provider.Shutdown()
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	// Trigger a single flag evaluation
+	provider.EvaluateFlag("test-flag", openfeature.FlattenedContext{})
+
+	// Verify the path is correct (no duplicated /ofrep/v1)
+	if capturedPath != "/ofrep/v1/evaluate/flags/test-flag" {
+		t.Errorf("Expected path '/ofrep/v1/evaluate/flags/test-flag', got '%s'", capturedPath)
+	}
+}
