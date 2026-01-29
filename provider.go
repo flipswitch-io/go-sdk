@@ -85,8 +85,9 @@ func NewProvider(apiKey string, opts ...Option) (*FlipswitchProvider, error) {
 		ofrep.WithHeader("X-Flipswitch-Features", p.getTelemetryFeaturesHeader()),
 	}
 
+	// Note: OFREP provider automatically appends /ofrep/v1 to the baseUrl
 	p.ofrepProvider = ofrep.NewProvider(
-		p.baseURL+"/ofrep/v1",
+		p.baseURL,
 		ofrepOpts...,
 	)
 
