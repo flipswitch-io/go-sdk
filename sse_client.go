@@ -183,7 +183,45 @@ func (c *SseClient) handleEvent(eventType, data string) {
 		return
 	}
 
-	if eventType == "flag-change" {
+	if eventType == "flag-updated" {
+		// Single flag was modified
+		var parsed FlagUpdatedEvent
+		if err := json.Unmarshal([]byte(data), &parsed); err != nil {
+			log.Printf("[Flipswitch] Failed to parse flag-updated event: %v", err)
+			return
+		}
+
+		event := FlagChangeEvent{
+			FlagKey:   parsed.FlagKey,
+			Timestamp: parsed.Timestamp,
+		}
+
+		if c.onFlagChange != nil {
+			c.onFlagChange(event)
+		}
+	} else if eventType == "config-updated" {
+		// Configuration changed, need to refresh all flags
+		var parsed ConfigUpdatedEvent
+		if err := json.Unmarshal([]byte(data), &parsed); err != nil {
+			log.Printf("[Flipswitch] Failed to parse config-updated event: %v", err)
+			return
+		}
+
+		// Log warning for api-key-rotated
+		if parsed.Reason == "api-key-rotated" {
+			log.Printf("[Flipswitch] WARNING: API key has been rotated. You may need to update your API key configuration.")
+		}
+
+		event := FlagChangeEvent{
+			FlagKey:   "", // Empty indicates all flags should be refreshed
+			Timestamp: parsed.Timestamp,
+		}
+
+		if c.onFlagChange != nil {
+			c.onFlagChange(event)
+		}
+	} else if eventType == "flag-change" {
+		// Legacy event format for backward compatibility
 		var event FlagChangeEvent
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
 			log.Printf("[Flipswitch] Failed to parse flag-change event: %v", err)

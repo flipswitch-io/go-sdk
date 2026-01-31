@@ -30,7 +30,25 @@ const (
 	StatusError ConnectionStatus = "error"
 )
 
-// FlagChangeEvent represents a flag change event received via SSE.
+// FlagUpdatedEvent represents a single flag update event received via SSE.
+type FlagUpdatedEvent struct {
+	// FlagKey is the key of the flag that changed.
+	FlagKey string `json:"flagKey"`
+
+	// Timestamp is the ISO timestamp of when the change occurred.
+	Timestamp string `json:"timestamp"`
+}
+
+// ConfigUpdatedEvent represents a configuration update event received via SSE.
+type ConfigUpdatedEvent struct {
+	// Reason is the reason for the configuration update (e.g., "segment-modified", "api-key-rotated").
+	Reason string `json:"reason"`
+
+	// Timestamp is the ISO timestamp of when the change occurred.
+	Timestamp string `json:"timestamp"`
+}
+
+// FlagChangeEvent represents a flag change event received via SSE (legacy/internal format).
 type FlagChangeEvent struct {
 	// FlagKey is the key of the flag that changed, or empty for bulk invalidation.
 	FlagKey string `json:"flagKey,omitempty"`
