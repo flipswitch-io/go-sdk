@@ -216,15 +216,19 @@ func (c *SseClient) handleEvent(eventType, data string) {
 			c.onFlagChange(event)
 		}
 	} else if eventType == "api-key-rotated" {
-		// API key was rotated - warning only, no cache invalidation
+		// API key was rotated or rotation was aborted
 		var parsed ApiKeyRotatedEvent
 		if err := json.Unmarshal([]byte(data), &parsed); err != nil {
 			log.Printf("[Flipswitch] Failed to parse api-key-rotated event: %v", err)
 			return
 		}
 
-		log.Printf("[Flipswitch] WARNING: API key was rotated. Current key valid until: %s", parsed.ValidUntil)
-		// No cache invalidation - this is just a warning
+		if parsed.ValidUntil == "" {
+			log.Println("[Flipswitch] API key rotation was aborted")
+		} else {
+			log.Printf("[Flipswitch] WARNING: API key was rotated. Current key valid until: %s", parsed.ValidUntil)
+		}
+		// No cache invalidation - this is just informational
 	}
 }
 

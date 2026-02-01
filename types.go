@@ -46,11 +46,13 @@ type ConfigUpdatedEvent struct {
 }
 
 // ApiKeyRotatedEvent represents an API key rotation event received via SSE.
+// If ValidUntil is empty, it indicates the rotation was aborted.
 type ApiKeyRotatedEvent struct {
 	// ValidUntil is the ISO timestamp when the current key expires.
+	// Empty if the rotation was aborted.
 	ValidUntil string `json:"validUntil"`
 
-	// Timestamp is the ISO timestamp of when the rotation occurred.
+	// Timestamp is the ISO timestamp of when the event occurred.
 	Timestamp string `json:"timestamp"`
 }
 
