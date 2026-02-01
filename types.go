@@ -41,10 +41,18 @@ type FlagUpdatedEvent struct {
 
 // ConfigUpdatedEvent represents a configuration update event received via SSE.
 type ConfigUpdatedEvent struct {
-	// Reason is the reason for the configuration update (e.g., "segment-modified", "api-key-rotated").
-	Reason string `json:"reason"`
-
 	// Timestamp is the ISO timestamp of when the change occurred.
+	Timestamp string `json:"timestamp"`
+}
+
+// ApiKeyRotatedEvent represents an API key rotation event received via SSE.
+// If ValidUntil is empty, it indicates the rotation was aborted.
+type ApiKeyRotatedEvent struct {
+	// ValidUntil is the ISO timestamp when the current key expires.
+	// Empty if the rotation was aborted.
+	ValidUntil string `json:"validUntil"`
+
+	// Timestamp is the ISO timestamp of when the event occurred.
 	Timestamp string `json:"timestamp"`
 }
 

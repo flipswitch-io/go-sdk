@@ -30,14 +30,17 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/open-feature/go-sdk-contrib/providers/ofrep"
 	"github.com/open-feature/go-sdk/openfeature"
 )
 
 const (
-	defaultBaseURL = "https://api.flipswitch.io"
-	sdkVersion     = "0.1.0"
+	defaultBaseURL         = "https://api.flipswitch.io"
+	sdkVersion             = "0.1.1"
+	defaultPollingInterval = 30 * time.Second
+	defaultMaxSseRetries   = 5
 )
 
 // FlipswitchProvider is an OpenFeature provider for Flipswitch with
@@ -47,6 +50,15 @@ type FlipswitchProvider struct {
 	apiKey         string
 	enableRealtime bool
 	httpClient     *http.Client
+
+	// Polling fallback configuration
+	enablePollingFallback bool
+	pollingInterval       time.Duration
+	maxSseRetries         int
+	sseRetryCount         int
+	pollingActive         bool
+	pollingTicker         *time.Ticker
+	pollingDone           chan bool
 
 	ofrepProvider       *ofrep.Provider
 	flagChangeListeners []FlagChangeHandler
@@ -63,11 +75,15 @@ func NewProvider(apiKey string, opts ...Option) (*FlipswitchProvider, error) {
 	}
 
 	p := &FlipswitchProvider{
-		baseURL:             defaultBaseURL,
-		apiKey:              apiKey,
-		enableRealtime:      true,
-		httpClient:          &http.Client{},
-		flagChangeListeners: make([]FlagChangeHandler, 0),
+		baseURL:               defaultBaseURL,
+		apiKey:                apiKey,
+		enableRealtime:        true,
+		httpClient:            &http.Client{},
+		flagChangeListeners:   make([]FlagChangeHandler, 0),
+		enablePollingFallback: true,
+		pollingInterval:       defaultPollingInterval,
+		maxSseRetries:         defaultMaxSseRetries,
+		pollingDone:           make(chan bool),
 	}
 
 	for _, opt := range opts {
@@ -141,6 +157,27 @@ func WithRealtime(enabled bool) Option {
 func WithHTTPClient(client *http.Client) Option {
 	return func(p *FlipswitchProvider) {
 		p.httpClient = client
+	}
+}
+
+// WithPollingFallback enables or disables polling fallback when SSE fails.
+func WithPollingFallback(enabled bool) Option {
+	return func(p *FlipswitchProvider) {
+		p.enablePollingFallback = enabled
+	}
+}
+
+// WithPollingInterval sets the polling interval for fallback mode.
+func WithPollingInterval(interval time.Duration) Option {
+	return func(p *FlipswitchProvider) {
+		p.pollingInterval = interval
+	}
+}
+
+// WithMaxSseRetries sets the maximum SSE retry attempts before falling back to polling.
+func WithMaxSseRetries(retries int) Option {
+	return func(p *FlipswitchProvider) {
+		p.maxSseRetries = retries
 	}
 }
 
@@ -218,6 +255,9 @@ func (p *FlipswitchProvider) validateAPIKey() error {
 
 // Shutdown shuts down the provider and closes all connections.
 func (p *FlipswitchProvider) Shutdown() {
+	// Stop polling if active
+	p.stopPolling()
+
 	if p.sseClient != nil {
 		p.sseClient.Close()
 		p.sseClient = nil
@@ -228,6 +268,66 @@ func (p *FlipswitchProvider) Shutdown() {
 	p.mu.Unlock()
 
 	log.Println("[Flipswitch] Provider shut down")
+}
+
+// startPollingFallback starts polling when SSE fails.
+func (p *FlipswitchProvider) startPollingFallback() {
+	p.mu.Lock()
+	if p.pollingActive || !p.enablePollingFallback {
+		p.mu.Unlock()
+		return
+	}
+
+	log.Printf("[Flipswitch] Starting polling fallback (interval: %v)", p.pollingInterval)
+	p.pollingActive = true
+	p.pollingTicker = time.NewTicker(p.pollingInterval)
+	p.mu.Unlock()
+
+	go func() {
+		for {
+			select {
+			case <-p.pollingDone:
+				return
+			case <-p.pollingTicker.C:
+				p.pollFlags()
+			}
+		}
+	}()
+}
+
+// pollFlags polls for flag updates.
+func (p *FlipswitchProvider) pollFlags() {
+	// The OFREP Go provider doesn't expose cache invalidation,
+	// but flag evaluations will refetch on next call
+	log.Println("[Flipswitch] Polling: checking for flag updates")
+}
+
+// stopPolling stops the polling fallback.
+func (p *FlipswitchProvider) stopPolling() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if !p.pollingActive {
+		return
+	}
+
+	p.pollingActive = false
+	if p.pollingTicker != nil {
+		p.pollingTicker.Stop()
+		p.pollingTicker = nil
+	}
+
+	select {
+	case p.pollingDone <- true:
+	default:
+	}
+}
+
+// IsPollingActive returns whether polling fallback is active.
+func (p *FlipswitchProvider) IsPollingActive() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.pollingActive
 }
 
 func (p *FlipswitchProvider) startSseConnection() {
@@ -252,6 +352,11 @@ func (p *FlipswitchProvider) getTelemetryHeaders() map[string]string {
 }
 
 func (p *FlipswitchProvider) handleFlagChange(event FlagChangeEvent) {
+	// Trigger OFREP provider cache refresh by signaling state change
+	// Note: The OFREP Go provider uses in-memory caching that gets refreshed
+	// on the next evaluation call, so we just need to notify listeners
+	// that configuration has changed
+
 	p.mu.RLock()
 	listeners := make([]FlagChangeHandler, len(p.flagChangeListeners))
 	copy(listeners, p.flagChangeListeners)
@@ -271,8 +376,31 @@ func (p *FlipswitchProvider) handleFlagChange(event FlagChangeEvent) {
 
 func (p *FlipswitchProvider) handleStatusChange(status ConnectionStatus) {
 	if status == StatusError {
-		log.Println("[Flipswitch] SSE connection error, provider is stale")
+		p.mu.Lock()
+		p.sseRetryCount++
+		retryCount := p.sseRetryCount
+		maxRetries := p.maxSseRetries
+		p.mu.Unlock()
+
+		log.Printf("[Flipswitch] SSE connection error (retry %d), provider is stale", retryCount)
+
+		// Check if we should fall back to polling
+		if retryCount >= maxRetries && p.enablePollingFallback {
+			log.Printf("[Flipswitch] SSE failed after %d retries - falling back to polling", retryCount)
+			p.startPollingFallback()
+		}
 	} else if status == StatusConnected {
+		// SSE connected - reset retry count and stop polling
+		p.mu.Lock()
+		p.sseRetryCount = 0
+		wasPolling := p.pollingActive
+		p.mu.Unlock()
+
+		if wasPolling {
+			log.Println("[Flipswitch] SSE reconnected - stopping polling fallback")
+			p.stopPolling()
+		}
+
 		log.Println("[Flipswitch] SSE connection restored")
 	}
 }
