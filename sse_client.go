@@ -200,16 +200,11 @@ func (c *SseClient) handleEvent(eventType, data string) {
 			c.onFlagChange(event)
 		}
 	} else if eventType == "config-updated" {
-		// Configuration changed, need to refresh all flags
+		// Configuration changed, always refresh all flags
 		var parsed ConfigUpdatedEvent
 		if err := json.Unmarshal([]byte(data), &parsed); err != nil {
 			log.Printf("[Flipswitch] Failed to parse config-updated event: %v", err)
 			return
-		}
-
-		// Log warning for api-key-rotated
-		if parsed.Reason == "api-key-rotated" {
-			log.Printf("[Flipswitch] WARNING: API key has been rotated. You may need to update your API key configuration.")
 		}
 
 		event := FlagChangeEvent{
@@ -220,17 +215,16 @@ func (c *SseClient) handleEvent(eventType, data string) {
 		if c.onFlagChange != nil {
 			c.onFlagChange(event)
 		}
-	} else if eventType == "flag-change" {
-		// Legacy event format for backward compatibility
-		var event FlagChangeEvent
-		if err := json.Unmarshal([]byte(data), &event); err != nil {
-			log.Printf("[Flipswitch] Failed to parse flag-change event: %v", err)
+	} else if eventType == "api-key-rotated" {
+		// API key was rotated - warning only, no cache invalidation
+		var parsed ApiKeyRotatedEvent
+		if err := json.Unmarshal([]byte(data), &parsed); err != nil {
+			log.Printf("[Flipswitch] Failed to parse api-key-rotated event: %v", err)
 			return
 		}
 
-		if c.onFlagChange != nil {
-			c.onFlagChange(event)
-		}
+		log.Printf("[Flipswitch] WARNING: API key was rotated. Current key valid until: %s", parsed.ValidUntil)
+		// No cache invalidation - this is just a warning
 	}
 }
 
