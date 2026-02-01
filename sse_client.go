@@ -88,7 +88,7 @@ func (c *SseClient) connectLoop() {
 			c.mu.RUnlock()
 
 			if !closed {
-				log.Printf("[Flipswitch] SSE connection error: %v", err)
+				log.Printf("[Flipswitch] WARN: SSE connection error: %v", err)
 				c.updateStatus(StatusError)
 				c.scheduleReconnect()
 			}
