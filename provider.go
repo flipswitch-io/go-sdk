@@ -28,6 +28,7 @@ import (
 	"log"
 	"net/http"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -38,10 +39,28 @@ import (
 
 const (
 	defaultBaseURL         = "https://api.flipswitch.io"
-	sdkVersion             = "0.1.1"
 	defaultPollingInterval = 30 * time.Second
 	defaultMaxSseRetries   = 5
 )
+
+var sdkVersion = getVersion()
+
+func getVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		// Check dependencies for when this module is imported
+		for _, dep := range info.Deps {
+			if dep.Path == "github.com/flipswitch-io/go-sdk" {
+				return strings.TrimPrefix(dep.Version, "v")
+			}
+		}
+		// Check main module for when running from the module itself
+		if info.Main.Path == "github.com/flipswitch-io/go-sdk" &&
+			info.Main.Version != "" && info.Main.Version != "(devel)" {
+			return strings.TrimPrefix(info.Main.Version, "v")
+		}
+	}
+	return "dev"
+}
 
 // FlipswitchProvider is an OpenFeature provider for Flipswitch with
 // real-time SSE support.
