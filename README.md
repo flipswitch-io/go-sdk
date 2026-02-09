@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/flipswitch-io/go-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/flipswitch-io/go-sdk/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/flipswitch-io/go-sdk.svg)](https://pkg.go.dev/github.com/flipswitch-io/go-sdk)
+[![codecov](https://codecov.io/gh/flipswitch-io/go-sdk/branch/main/graph/badge.svg)](https://codecov.io/gh/flipswitch-io/go-sdk)
 
 Flipswitch SDK for Go with real-time SSE support for OpenFeature.
 
