@@ -300,6 +300,7 @@ func (p *FlipswitchProvider) startPollingFallback() {
 	log.Printf("[Flipswitch] Starting polling fallback (interval: %v)", p.pollingInterval)
 	p.pollingActive = true
 	p.pollingTicker = time.NewTicker(p.pollingInterval)
+	tickerC := p.pollingTicker.C
 	p.mu.Unlock()
 
 	go func() {
@@ -307,7 +308,7 @@ func (p *FlipswitchProvider) startPollingFallback() {
 			select {
 			case <-p.pollingDone:
 				return
-			case <-p.pollingTicker.C:
+			case <-tickerC:
 				p.pollFlags()
 			}
 		}
