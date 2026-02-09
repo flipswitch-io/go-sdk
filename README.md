@@ -1,4 +1,4 @@
-# Flipswitch Go SDK
+# Flipswitch Go SDK 
 
 [![CI](https://github.com/flipswitch-io/go-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/flipswitch-io/go-sdk/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/flipswitch-io/go-sdk.svg)](https://pkg.go.dev/github.com/flipswitch-io/go-sdk)
