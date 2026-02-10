@@ -1762,6 +1762,412 @@ func TestPollingFallback_TickerFiresPollFlags(t *testing.T) {
 	provider.Shutdown()
 }
 
+// ========================================
+// EvaluateAllFlags Error Path Tests
+// ========================================
+
+func TestEvaluateAllFlags_NetworkError(t *testing.T) {
+	dispatcher := NewTestDispatcher()
+	server := httptest.NewServer(dispatcher)
+
+	provider, err := createTestProvider(server)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	// Shut down server to force network error
+	server.Close()
+
+	flags := provider.EvaluateAllFlags(openfeature.FlattenedContext{"targetingKey": "user-1"})
+
+	if len(flags) != 0 {
+		t.Errorf("Expected empty list on network error, got %d flags", len(flags))
+	}
+
+	provider.Shutdown()
+}
+
+func TestEvaluateAllFlags_MalformedJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write([]byte(`{invalid json`))
+	}))
+	defer server.Close()
+
+	provider, err := NewProvider(
+		"test-api-key",
+		WithBaseURL(server.URL),
+		WithRealtime(false),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+	defer provider.Shutdown()
+
+	// Skip Init (it would fail too). Directly call EvaluateAllFlags.
+	flags := provider.EvaluateAllFlags(openfeature.FlattenedContext{"targetingKey": "user-1"})
+
+	if len(flags) != 0 {
+		t.Errorf("Expected empty list on malformed JSON, got %d flags", len(flags))
+	}
+}
+
+func TestEvaluateAllFlags_NonSuccessStatus(t *testing.T) {
+	// Server returns 200 for init, then 500 for bulk eval
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.Header().Set("Content-Type", "application/json")
+		if requestCount == 1 {
+			// Init request succeeds
+			w.WriteHeader(200)
+			json.NewEncoder(w).Encode(map[string]interface{}{"flags": []interface{}{}})
+			return
+		}
+		// Subsequent bulk eval returns 500
+		w.WriteHeader(500)
+	}))
+	defer server.Close()
+
+	provider, err := NewProvider(
+		"test-api-key",
+		WithBaseURL(server.URL),
+		WithRealtime(false),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+	defer provider.Shutdown()
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	flags := provider.EvaluateAllFlags(openfeature.FlattenedContext{"targetingKey": "user-1"})
+
+	if len(flags) != 0 {
+		t.Errorf("Expected empty list on 500 status, got %d flags", len(flags))
+	}
+}
+
+func TestEvaluateAllFlags_FlagWithoutKey(t *testing.T) {
+	dispatcher := NewTestDispatcher()
+	dispatcher.SetBulkResponse(func() (int, map[string]interface{}) {
+		return 200, map[string]interface{}{
+			"flags": []interface{}{
+				map[string]interface{}{"value": true},                           // no key
+				map[string]interface{}{"key": "valid", "value": "hello"},        // has key
+				map[string]interface{}{"value": float64(42), "reason": "MATCH"}, // no key
+			},
+		}
+	})
+	server := httptest.NewServer(dispatcher)
+	defer server.Close()
+
+	provider, err := createTestProvider(server)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+	defer provider.Shutdown()
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	flags := provider.EvaluateAllFlags(openfeature.FlattenedContext{"targetingKey": "user-1"})
+
+	if len(flags) != 1 {
+		t.Fatalf("Expected 1 flag (skipping those without key), got %d", len(flags))
+	}
+	if flags[0].Key != "valid" {
+		t.Errorf("Expected key 'valid', got '%s'", flags[0].Key)
+	}
+}
+
+func TestEvaluateAllFlags_FlagItemNotMap(t *testing.T) {
+	dispatcher := NewTestDispatcher()
+	dispatcher.SetBulkResponse(func() (int, map[string]interface{}) {
+		return 200, map[string]interface{}{
+			"flags": []interface{}{
+				"not-a-map",
+				42,
+				map[string]interface{}{"key": "valid", "value": true},
+			},
+		}
+	})
+	server := httptest.NewServer(dispatcher)
+	defer server.Close()
+
+	provider, err := createTestProvider(server)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+	defer provider.Shutdown()
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	flags := provider.EvaluateAllFlags(openfeature.FlattenedContext{"targetingKey": "user-1"})
+
+	if len(flags) != 1 {
+		t.Fatalf("Expected 1 flag (skipping non-map items), got %d", len(flags))
+	}
+	if flags[0].Key != "valid" {
+		t.Errorf("Expected key 'valid', got '%s'", flags[0].Key)
+	}
+}
+
+// ========================================
+// EvaluateFlag Error Path Tests
+// ========================================
+
+func TestEvaluateFlag_NetworkError(t *testing.T) {
+	dispatcher := NewTestDispatcher()
+	server := httptest.NewServer(dispatcher)
+
+	provider, err := createTestProvider(server)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	// Shut down server to force network error
+	server.Close()
+
+	result := provider.EvaluateFlag("my-flag", openfeature.FlattenedContext{})
+
+	if result != nil {
+		t.Errorf("Expected nil on network error, got %+v", result)
+	}
+
+	provider.Shutdown()
+}
+
+func TestEvaluateFlag_MalformedJSON(t *testing.T) {
+	// Server returns 200 for init, then malformed JSON for single flag
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/ofrep/v1/evaluate/flags" {
+			w.WriteHeader(200)
+			json.NewEncoder(w).Encode(map[string]interface{}{"flags": []interface{}{}})
+			return
+		}
+		// Single flag eval returns malformed JSON
+		w.WriteHeader(200)
+		w.Write([]byte(`{not valid json`))
+	}))
+	defer server.Close()
+
+	provider, err := NewProvider(
+		"test-api-key",
+		WithBaseURL(server.URL),
+		WithRealtime(false),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+	defer provider.Shutdown()
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	result := provider.EvaluateFlag("my-flag", openfeature.FlattenedContext{})
+
+	if result != nil {
+		t.Errorf("Expected nil on malformed JSON, got %+v", result)
+	}
+}
+
+func TestEvaluateFlag_NonSuccessNon404Status(t *testing.T) {
+	dispatcher := NewTestDispatcher()
+	dispatcher.SetFlagResponse("bad-flag", func() (int, map[string]interface{}) {
+		return 400, map[string]interface{}{}
+	})
+	server := httptest.NewServer(dispatcher)
+	defer server.Close()
+
+	provider, err := createTestProvider(server)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+	defer provider.Shutdown()
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	result := provider.EvaluateFlag("bad-flag", openfeature.FlattenedContext{})
+
+	if result != nil {
+		t.Errorf("Expected nil for 400 status, got %+v", result)
+	}
+}
+
+// ========================================
+// InferType Edge Cases
+// ========================================
+
+func TestInferType_Unknown(t *testing.T) {
+	// Pass a type that doesn't match any switch case
+	ch := make(chan int)
+	if inferType(ch) != "unknown" {
+		t.Errorf("Expected 'unknown' for chan type, got '%s'", inferType(ch))
+	}
+
+	fn := func() {}
+	if inferType(fn) != "unknown" {
+		t.Errorf("Expected 'unknown' for func type, got '%s'", inferType(fn))
+	}
+}
+
+// ========================================
+// scheduleReconnect Context Cancellation
+// ========================================
+
+func TestScheduleReconnect_ContextCancellation(t *testing.T) {
+	client := NewSseClient(
+		"http://localhost:0",
+		"test-key",
+		nil,
+		func(event FlagChangeEvent) {},
+		func(status ConnectionStatus) {},
+	)
+
+	// Close the client, which cancels its context
+	client.Close()
+
+	// scheduleReconnect should return immediately because ctx is done
+	client.scheduleReconnect()
+
+	// If we get here without hanging, the test passes
+	// The delay should not have been doubled because ctx was cancelled
+	client.mu.RLock()
+	delay := client.retryDelay
+	client.mu.RUnlock()
+
+	if delay != minRetryDelay {
+		t.Errorf("Expected retryDelay to stay at min (%v), got %v", minRetryDelay, delay)
+	}
+}
+
+// ========================================
+// floatToString Edge Cases
+// ========================================
+
+func TestFloatToString_ZeroFractionalPart(t *testing.T) {
+	// 3.0 should return "3" (covers the fracInt == 0 branch via the integer check)
+	result := floatToString(3.0)
+	if result != "3" {
+		t.Errorf("Expected '3' for 3.0, got '%s'", result)
+	}
+
+	// 0.0 should return "0"
+	result = floatToString(0.0)
+	if result != "0" {
+		t.Errorf("Expected '0' for 0.0, got '%s'", result)
+	}
+
+	// Test a negative whole number
+	result = floatToString(-5.0)
+	if result != "-5" {
+		t.Errorf("Expected '-5' for -5.0, got '%s'", result)
+	}
+}
+
+// ========================================
+// Double startPollingFallback
+// ========================================
+
+func TestStartPollingFallback_DoubleCallIsNoOp(t *testing.T) {
+	dispatcher := NewTestDispatcher()
+	server := httptest.NewServer(dispatcher)
+	defer server.Close()
+
+	provider, err := NewProvider(
+		"test-api-key",
+		WithBaseURL(server.URL),
+		WithRealtime(false),
+		WithMaxSseRetries(1),
+		WithPollingFallback(true),
+		WithPollingInterval(1*time.Hour),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	// Trigger polling
+	provider.handleStatusChange(StatusError)
+	if !provider.IsPollingActive() {
+		t.Fatal("Expected polling to be active")
+	}
+
+	// Second call should be a no-op (not create a second ticker)
+	provider.startPollingFallback()
+	if !provider.IsPollingActive() {
+		t.Error("Expected polling to still be active")
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	provider.Shutdown()
+}
+
+// ========================================
+// stopPolling when not active
+// ========================================
+
+func TestStopPolling_WhenNotActive(t *testing.T) {
+	dispatcher := NewTestDispatcher()
+	server := httptest.NewServer(dispatcher)
+	defer server.Close()
+
+	provider, err := createTestProvider(server)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+	defer provider.Shutdown()
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	// Polling is not active
+	if provider.IsPollingActive() {
+		t.Fatal("Expected polling to not be active")
+	}
+
+	// stopPolling should be a no-op, not panic
+	provider.stopPolling()
+
+	if provider.IsPollingActive() {
+		t.Error("Expected polling to still not be active")
+	}
+}
+
 // helper
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsAt(s, substr))
