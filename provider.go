@@ -83,6 +83,7 @@ type FlipswitchProvider struct {
 	flagChangeListeners []FlagChangeHandler
 	sseClient           *SseClient
 	initialized         bool
+	eventChan           chan openfeature.Event
 	mu                  sync.RWMutex
 }
 
@@ -103,6 +104,7 @@ func NewProvider(apiKey string, opts ...Option) (*FlipswitchProvider, error) {
 		pollingInterval:       defaultPollingInterval,
 		maxSseRetries:         defaultMaxSseRetries,
 		pollingDone:           make(chan bool),
+		eventChan:             make(chan openfeature.Event, 5),
 	}
 
 	for _, opt := range opts {
@@ -371,11 +373,32 @@ func (p *FlipswitchProvider) getTelemetryHeaders() map[string]string {
 	}
 }
 
+// EventChannel returns the channel for OpenFeature provider events.
+// Implements the openfeature.EventHandler interface.
+func (p *FlipswitchProvider) EventChannel() <-chan openfeature.Event {
+	return p.eventChan
+}
+
 func (p *FlipswitchProvider) handleFlagChange(event FlagChangeEvent) {
 	// Trigger OFREP provider cache refresh by signaling state change
 	// Note: The OFREP Go provider uses in-memory caching that gets refreshed
 	// on the next evaluation call, so we just need to notify listeners
 	// that configuration has changed
+
+	// Emit OpenFeature ProviderConfigChange event
+	ofEvent := openfeature.Event{
+		ProviderName: "flipswitch",
+		EventType:    openfeature.ProviderConfigChange,
+		ProviderEventDetails: openfeature.ProviderEventDetails{},
+	}
+	if event.FlagKey != "" {
+		ofEvent.FlagChanges = []string{event.FlagKey}
+	}
+	select {
+	case p.eventChan <- ofEvent:
+	default:
+		log.Println("[Flipswitch] Event channel full, dropping config change event")
+	}
 
 	p.mu.RLock()
 	listeners := make([]FlagChangeHandler, len(p.flagChangeListeners))
