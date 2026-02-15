@@ -807,6 +807,95 @@ func TestHandleFlagChange_MultipleListeners(t *testing.T) {
 }
 
 // ========================================
+// Flag Change Event Details Tests
+// ========================================
+
+func TestHandleFlagChange_FlagUpdated_EmitsEventWithFlagChanges(t *testing.T) {
+	dispatcher := NewTestDispatcher()
+	server := httptest.NewServer(dispatcher)
+	defer server.Close()
+
+	provider, err := createTestProvider(server)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+	defer provider.Shutdown()
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	// Trigger flag change with a specific flag key
+	provider.handleFlagChange(FlagChangeEvent{
+		FlagKey:   "my-feature",
+		Timestamp: "2024-01-01T00:00:00Z",
+	})
+
+	select {
+	case event := <-provider.EventChannel():
+		if event.EventType != openfeature.ProviderConfigChange {
+			t.Errorf("Expected ProviderConfigChange, got %s", event.EventType)
+		}
+		if len(event.FlagChanges) != 1 || event.FlagChanges[0] != "my-feature" {
+			t.Errorf("Expected FlagChanges=[my-feature], got %v", event.FlagChanges)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Timed out waiting for event on EventChannel")
+	}
+}
+
+func TestHandleFlagChange_ConfigUpdated_EmitsEventWithoutFlagChanges(t *testing.T) {
+	dispatcher := NewTestDispatcher()
+	server := httptest.NewServer(dispatcher)
+	defer server.Close()
+
+	provider, err := createTestProvider(server)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+	defer provider.Shutdown()
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	// Trigger config change without a specific flag key
+	provider.handleFlagChange(FlagChangeEvent{
+		FlagKey:   "",
+		Timestamp: "2024-01-01T00:00:00Z",
+	})
+
+	select {
+	case event := <-provider.EventChannel():
+		if event.EventType != openfeature.ProviderConfigChange {
+			t.Errorf("Expected ProviderConfigChange, got %s", event.EventType)
+		}
+		if len(event.FlagChanges) != 0 {
+			t.Errorf("Expected empty FlagChanges for config-updated, got %v", event.FlagChanges)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Timed out waiting for event on EventChannel")
+	}
+}
+
+func TestEventChannel_ImplementsEventHandler(t *testing.T) {
+	dispatcher := NewTestDispatcher()
+	server := httptest.NewServer(dispatcher)
+	defer server.Close()
+
+	provider, err := createTestProvider(server)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+	defer provider.Shutdown()
+
+	// Verify provider implements openfeature.EventHandler
+	var _ openfeature.EventHandler = provider
+}
+
+// ========================================
 // Shutdown / Cleanup Tests
 // ========================================
 
