@@ -80,7 +80,9 @@ type FlipswitchProvider struct {
 	pollingDone           chan bool
 
 	ofrepProvider       *ofrep.Provider
-	flagChangeListeners []FlagChangeHandler
+	flagChangeListeners map[int]FlagChangeHandler
+	keyFlagChangeListeners map[string]map[int]FlagChangeHandler
+	nextListenerID      int
 	sseClient           *SseClient
 	initialized         bool
 	eventChan           chan openfeature.Event
@@ -99,7 +101,8 @@ func NewProvider(apiKey string, opts ...Option) (*FlipswitchProvider, error) {
 		apiKey:                apiKey,
 		enableRealtime:        true,
 		httpClient:            &http.Client{},
-		flagChangeListeners:   make([]FlagChangeHandler, 0),
+		flagChangeListeners:    make(map[int]FlagChangeHandler),
+		keyFlagChangeListeners: make(map[string]map[int]FlagChangeHandler),
 		enablePollingFallback: true,
 		pollingInterval:       defaultPollingInterval,
 		maxSseRetries:         defaultMaxSseRetries,
@@ -400,12 +403,47 @@ func (p *FlipswitchProvider) handleFlagChange(event FlagChangeEvent) {
 		log.Println("[Flipswitch] Event channel full, dropping config change event")
 	}
 
+	// Snapshot global listeners
 	p.mu.RLock()
-	listeners := make([]FlagChangeHandler, len(p.flagChangeListeners))
-	copy(listeners, p.flagChangeListeners)
+	globalListeners := make([]FlagChangeHandler, 0, len(p.flagChangeListeners))
+	for _, listener := range p.flagChangeListeners {
+		globalListeners = append(globalListeners, listener)
+	}
+
+	// Snapshot key-specific listeners
+	var keyListeners []FlagChangeHandler
+	if event.FlagKey != "" {
+		// Targeted change — fire only matching key listeners
+		if listeners, ok := p.keyFlagChangeListeners[event.FlagKey]; ok {
+			keyListeners = make([]FlagChangeHandler, 0, len(listeners))
+			for _, listener := range listeners {
+				keyListeners = append(keyListeners, listener)
+			}
+		}
+	} else {
+		// Bulk invalidation — fire ALL key-specific listeners
+		for _, listeners := range p.keyFlagChangeListeners {
+			for _, listener := range listeners {
+				keyListeners = append(keyListeners, listener)
+			}
+		}
+	}
 	p.mu.RUnlock()
 
-	for _, listener := range listeners {
+	// Fire global listeners
+	for _, listener := range globalListeners {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[Flipswitch] Error in flag change listener: %v", r)
+				}
+			}()
+			listener(event)
+		}()
+	}
+
+	// Fire key-specific listeners
+	for _, listener := range keyListeners {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -448,25 +486,55 @@ func (p *FlipswitchProvider) handleStatusChange(status ConnectionStatus) {
 	}
 }
 
-// AddFlagChangeListener adds a listener for flag change events.
-func (p *FlipswitchProvider) AddFlagChangeListener(handler FlagChangeHandler) {
+// AddFlagChangeListener adds a listener for all flag change events.
+// Returns a CancelFunc that removes the listener when called.
+func (p *FlipswitchProvider) AddFlagChangeListener(handler FlagChangeHandler) CancelFunc {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.flagChangeListeners = append(p.flagChangeListeners, handler)
+	id := p.nextListenerID
+	p.nextListenerID++
+	p.flagChangeListeners[id] = handler
+	p.mu.Unlock()
+
+	return func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		delete(p.flagChangeListeners, id)
+	}
 }
 
-// RemoveFlagChangeListener removes a flag change listener.
-func (p *FlipswitchProvider) RemoveFlagChangeListener(handler FlagChangeHandler) {
+// AddFlagKeyChangeListener adds a listener for changes to a specific flag key.
+// The listener fires on targeted changes matching the key AND on bulk
+// invalidations (events with empty FlagKey).
+// Returns a CancelFunc that removes the listener when called.
+func (p *FlipswitchProvider) AddFlagKeyChangeListener(flagKey string, handler FlagChangeHandler) CancelFunc {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	id := p.nextListenerID
+	p.nextListenerID++
+	if _, ok := p.keyFlagChangeListeners[flagKey]; !ok {
+		p.keyFlagChangeListeners[flagKey] = make(map[int]FlagChangeHandler)
+	}
+	p.keyFlagChangeListeners[flagKey][id] = handler
+	p.mu.Unlock()
 
-	for i, h := range p.flagChangeListeners {
-		// Compare function pointers - this may not work for all cases
-		if &h == &handler {
-			p.flagChangeListeners = append(p.flagChangeListeners[:i], p.flagChangeListeners[i+1:]...)
-			return
+	return func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		if listeners, ok := p.keyFlagChangeListeners[flagKey]; ok {
+			delete(listeners, id)
+			if len(listeners) == 0 {
+				delete(p.keyFlagChangeListeners, flagKey)
+			}
 		}
 	}
+}
+
+// RemoveFlagChangeListener is deprecated. Use the CancelFunc returned by
+// AddFlagChangeListener or AddFlagKeyChangeListener instead.
+//
+// Deprecated: Function pointer comparison is unreliable in Go.
+func (p *FlipswitchProvider) RemoveFlagChangeListener(handler FlagChangeHandler) {
+	// No-op: kept for backward compatibility.
+	// Callers should use the CancelFunc returned by AddFlagChangeListener.
 }
 
 // GetSseStatus returns the current SSE connection status.

@@ -135,20 +135,19 @@ showFeature, _ := client.BooleanValue(ctx, "new-feature", false, evalCtx)
 Listen for flag changes:
 
 ```go
+// Listen for all flag changes (empty FlagKey means bulk invalidation)
 provider.AddFlagChangeListener(func(event flipswitch.FlagChangeEvent) {
-    if event.FlagKey != "" {
-        fmt.Printf("Flag changed: %s\n", event.FlagKey)
-    } else {
-        fmt.Println("All flags invalidated")
-    }
+    fmt.Printf("Flag changed: %s\n", event.FlagKey)
 })
 
-// Check SSE status
-status := provider.GetSseStatus()
-// StatusConnecting, StatusConnected, StatusDisconnected, StatusError
+// Listen for a specific flag (also fires on bulk invalidation)
+cancel := provider.AddFlagKeyChangeListener("dark-mode", func(event flipswitch.FlagChangeEvent) {
+    fmt.Println("dark-mode changed, re-evaluating...")
+})
+cancel() // stop listening
 
-// Force reconnect
-provider.ReconnectSse()
+status := provider.GetSseStatus() // current status
+provider.ReconnectSse()           // force reconnect
 ```
 
 ### Bulk Flag Evaluation
