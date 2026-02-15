@@ -220,5 +220,9 @@ func floatToString(f float64) string {
 // FlagChangeHandler is called when a flag changes.
 type FlagChangeHandler func(event FlagChangeEvent)
 
+// CancelFunc is returned by listener registration methods. Calling it
+// removes the corresponding listener.
+type CancelFunc func()
+
 // ConnectionStatusHandler is called when the SSE connection status changes.
 type ConnectionStatusHandler func(status ConnectionStatus)

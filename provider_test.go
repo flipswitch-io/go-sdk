@@ -1765,7 +1765,7 @@ func TestEvaluateAllFlags_WithFlagMetadata(t *testing.T) {
 // RemoveFlagChangeListener Tests
 // ========================================
 
-func TestRemoveFlagChangeListener(t *testing.T) {
+func TestRemoveFlagChangeListener_Deprecated(t *testing.T) {
 	dispatcher := NewTestDispatcher()
 	server := httptest.NewServer(dispatcher)
 	defer server.Close()
@@ -1788,9 +1788,8 @@ func TestRemoveFlagChangeListener(t *testing.T) {
 
 	provider.AddFlagChangeListener(listener)
 
-	// Call RemoveFlagChangeListener - note: the current implementation uses
-	// pointer comparison (&h == &handler) which doesn't work for Go closures,
-	// so the listener will NOT actually be removed. This test documents this behavior.
+	// RemoveFlagChangeListener is now deprecated (no-op).
+	// Use the CancelFunc returned by AddFlagChangeListener instead.
 	provider.RemoveFlagChangeListener(listener)
 
 	provider.handleFlagChange(FlagChangeEvent{
@@ -1798,10 +1797,51 @@ func TestRemoveFlagChangeListener(t *testing.T) {
 		Timestamp: "2024-01-01T00:00:00Z",
 	})
 
-	// The listener is still called because RemoveFlagChangeListener's pointer
-	// comparison doesn't work for closures in Go. This is a known limitation.
+	// Listener is still called because RemoveFlagChangeListener is now a no-op.
 	if callCount != 1 {
-		t.Errorf("expected listener to still be called (known limitation), got callCount=%d", callCount)
+		t.Errorf("expected listener to still be called (deprecated no-op), got callCount=%d", callCount)
+	}
+}
+
+func TestAddFlagChangeListener_CancelFunc(t *testing.T) {
+	dispatcher := NewTestDispatcher()
+	server := httptest.NewServer(dispatcher)
+	defer server.Close()
+
+	provider, err := createTestProvider(server)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+	defer provider.Shutdown()
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	callCount := 0
+	cancel := provider.AddFlagChangeListener(func(event FlagChangeEvent) {
+		callCount++
+	})
+
+	provider.handleFlagChange(FlagChangeEvent{
+		FlagKey:   "test",
+		Timestamp: "2024-01-01T00:00:00Z",
+	})
+
+	if callCount != 1 {
+		t.Fatalf("Expected 1 call, got %d", callCount)
+	}
+
+	cancel()
+
+	provider.handleFlagChange(FlagChangeEvent{
+		FlagKey:   "test",
+		Timestamp: "2024-01-01T00:00:00Z",
+	})
+
+	if callCount != 1 {
+		t.Errorf("Expected still 1 call after cancel, got %d", callCount)
 	}
 }
 
@@ -2254,6 +2294,274 @@ func TestStopPolling_WhenNotActive(t *testing.T) {
 
 	if provider.IsPollingActive() {
 		t.Error("Expected polling to still not be active")
+	}
+}
+
+// ========================================
+// Flag-Key-Specific Listener Tests
+// ========================================
+
+func TestAddFlagKeyChangeListener_FiresOnMatchingKey(t *testing.T) {
+	dispatcher := NewTestDispatcher()
+	server := httptest.NewServer(dispatcher)
+	defer server.Close()
+
+	provider, err := createTestProvider(server)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+	defer provider.Shutdown()
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	events := make([]FlagChangeEvent, 0)
+	provider.AddFlagKeyChangeListener("dark-mode", func(event FlagChangeEvent) {
+		events = append(events, event)
+	})
+
+	provider.handleFlagChange(FlagChangeEvent{
+		FlagKey:   "dark-mode",
+		Timestamp: "2024-01-01T00:00:00Z",
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(events))
+	}
+	if events[0].FlagKey != "dark-mode" {
+		t.Errorf("Expected flag key 'dark-mode', got '%s'", events[0].FlagKey)
+	}
+}
+
+func TestAddFlagKeyChangeListener_DoesNotFireOnNonMatchingKey(t *testing.T) {
+	dispatcher := NewTestDispatcher()
+	server := httptest.NewServer(dispatcher)
+	defer server.Close()
+
+	provider, err := createTestProvider(server)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+	defer provider.Shutdown()
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	keyEvents := make([]FlagChangeEvent, 0)
+	provider.AddFlagKeyChangeListener("dark-mode", func(event FlagChangeEvent) {
+		keyEvents = append(keyEvents, event)
+	})
+
+	provider.handleFlagChange(FlagChangeEvent{
+		FlagKey:   "other-flag",
+		Timestamp: "2024-01-01T00:00:00Z",
+	})
+
+	if len(keyEvents) != 0 {
+		t.Errorf("Expected 0 events for non-matching key, got %d", len(keyEvents))
+	}
+}
+
+func TestAddFlagKeyChangeListener_FiresOnBulkInvalidation(t *testing.T) {
+	dispatcher := NewTestDispatcher()
+	server := httptest.NewServer(dispatcher)
+	defer server.Close()
+
+	provider, err := createTestProvider(server)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+	defer provider.Shutdown()
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	events := make([]FlagChangeEvent, 0)
+	provider.AddFlagKeyChangeListener("dark-mode", func(event FlagChangeEvent) {
+		events = append(events, event)
+	})
+
+	// Empty FlagKey = bulk invalidation
+	provider.handleFlagChange(FlagChangeEvent{
+		FlagKey:   "",
+		Timestamp: "2024-01-01T00:00:00Z",
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("Expected 1 event on bulk invalidation, got %d", len(events))
+	}
+	if events[0].FlagKey != "" {
+		t.Errorf("Expected empty flag key for bulk invalidation, got '%s'", events[0].FlagKey)
+	}
+}
+
+func TestAddFlagKeyChangeListener_CancelFunc(t *testing.T) {
+	dispatcher := NewTestDispatcher()
+	server := httptest.NewServer(dispatcher)
+	defer server.Close()
+
+	provider, err := createTestProvider(server)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+	defer provider.Shutdown()
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	callCount := 0
+	cancel := provider.AddFlagKeyChangeListener("dark-mode", func(event FlagChangeEvent) {
+		callCount++
+	})
+
+	provider.handleFlagChange(FlagChangeEvent{
+		FlagKey:   "dark-mode",
+		Timestamp: "2024-01-01T00:00:00Z",
+	})
+
+	if callCount != 1 {
+		t.Fatalf("Expected 1 call, got %d", callCount)
+	}
+
+	cancel()
+
+	provider.handleFlagChange(FlagChangeEvent{
+		FlagKey:   "dark-mode",
+		Timestamp: "2024-01-01T00:00:00Z",
+	})
+
+	if callCount != 1 {
+		t.Errorf("Expected still 1 call after cancel, got %d", callCount)
+	}
+}
+
+func TestAddFlagKeyChangeListener_MultipleListenersForSameKey(t *testing.T) {
+	dispatcher := NewTestDispatcher()
+	server := httptest.NewServer(dispatcher)
+	defer server.Close()
+
+	provider, err := createTestProvider(server)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+	defer provider.Shutdown()
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	count1 := 0
+	count2 := 0
+	provider.AddFlagKeyChangeListener("dark-mode", func(event FlagChangeEvent) {
+		count1++
+	})
+	provider.AddFlagKeyChangeListener("dark-mode", func(event FlagChangeEvent) {
+		count2++
+	})
+
+	provider.handleFlagChange(FlagChangeEvent{
+		FlagKey:   "dark-mode",
+		Timestamp: "2024-01-01T00:00:00Z",
+	})
+
+	if count1 != 1 || count2 != 1 {
+		t.Errorf("Expected both listeners to fire once, got count1=%d count2=%d", count1, count2)
+	}
+}
+
+func TestAddFlagKeyChangeListener_ExceptionIsolated(t *testing.T) {
+	dispatcher := NewTestDispatcher()
+	server := httptest.NewServer(dispatcher)
+	defer server.Close()
+
+	provider, err := createTestProvider(server)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+	defer provider.Shutdown()
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	events := make([]FlagChangeEvent, 0)
+
+	// First listener panics
+	provider.AddFlagKeyChangeListener("dark-mode", func(event FlagChangeEvent) {
+		panic("listener error")
+	})
+	// Second listener should still fire
+	provider.AddFlagKeyChangeListener("dark-mode", func(event FlagChangeEvent) {
+		events = append(events, event)
+	})
+
+	provider.handleFlagChange(FlagChangeEvent{
+		FlagKey:   "dark-mode",
+		Timestamp: "2024-01-01T00:00:00Z",
+	})
+
+	if len(events) != 1 {
+		t.Errorf("Expected 1 event from second listener, got %d", len(events))
+	}
+}
+
+func TestGlobalAndKeyListenersBothFire(t *testing.T) {
+	dispatcher := NewTestDispatcher()
+	server := httptest.NewServer(dispatcher)
+	defer server.Close()
+
+	provider, err := createTestProvider(server)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+	defer provider.Shutdown()
+
+	err = provider.Init(openfeature.EvaluationContext{})
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	globalCount := 0
+	keyCount := 0
+
+	provider.AddFlagChangeListener(func(event FlagChangeEvent) {
+		globalCount++
+	})
+	provider.AddFlagKeyChangeListener("dark-mode", func(event FlagChangeEvent) {
+		keyCount++
+	})
+
+	// Matching key: both fire
+	provider.handleFlagChange(FlagChangeEvent{
+		FlagKey:   "dark-mode",
+		Timestamp: "2024-01-01T00:00:00Z",
+	})
+
+	if globalCount != 1 || keyCount != 1 {
+		t.Errorf("Expected both to fire, got global=%d key=%d", globalCount, keyCount)
+	}
+
+	// Non-matching key: only global fires
+	provider.handleFlagChange(FlagChangeEvent{
+		FlagKey:   "other-flag",
+		Timestamp: "2024-01-01T00:00:00Z",
+	})
+
+	if globalCount != 2 {
+		t.Errorf("Expected global=2, got %d", globalCount)
+	}
+	if keyCount != 1 {
+		t.Errorf("Expected key=1 (not fired for other-flag), got %d", keyCount)
 	}
 }
 
