@@ -2,7 +2,7 @@ module github.com/flipswitch-io/go-sdk
 
 go 1.25.0
 
-toolchain go1.26.2
+toolchain go1.26.3
 
 require (
 	github.com/open-feature/go-sdk v1.17.2
